@@ -3,15 +3,12 @@ mod msg;
 use std::sync::Arc;
 
 use axum::{
-    extract::{
-        ws::{Message, WebSocket},
-        WebSocketUpgrade,
-    },
+    extract::{ws::Message, WebSocketUpgrade},
     response::IntoResponse,
     Extension,
 };
 use dashmap::{DashMap, DashSet};
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 pub use msg::{Msg, MsgData};
 use tokio::sync::broadcast;
 use tracing::warn;
@@ -75,7 +72,10 @@ pub async fn ws_handler(
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
-pub async fn handle_socket(socket: WebSocket, state: ChatState) {
+pub async fn handle_socket<S>(socket: S, state: ChatState)
+where
+    S: Stream<Item = Result<Message, axum::Error>> + Sink<Message> + Send + 'static,
+{
     let mut rx = state.0.tx.subscribe();
     let (mut sender, mut receiver) = socket.split();
 
@@ -156,5 +156,89 @@ async fn handle_message(msg: Msg, state: Arc<State>) {
 
     if let Err(e) = state.tx.send(Arc::new(msg)) {
         warn!("Failed to send message: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use fake_socket::*;
+
+    #[tokio::test]
+    async fn handle_join_should_work() -> Result<()> {
+        let (mut client1, socket1) = create_fake_connection();
+        let (mut client2, socket2) = create_fake_connection();
+        let state = ChatState::new();
+
+        // mimic server behavior
+        let state1 = state.clone();
+        tokio::spawn(async move {
+            handle_socket(socket1, state1).await;
+        });
+
+        let state1 = state.clone();
+        tokio::spawn(async move {
+            handle_socket(socket2, state1).await;
+        });
+
+        let msg1 = &Msg::join("room1", "username1");
+        client1.send(Message::Text(msg1.try_into()?))?;
+
+        // let verify = |mut client: FakeClient<Message>,
+        //               room: &'static str,
+        //               username: &'static str,
+        //               data: MsgData| async move {
+        //     if let Some(Message::Text(msg1)) = client.recv().await {
+        //         let msg = Msg::try_from(msg1.as_str())?;
+        //         assert_eq!(msg.room, room);
+        //         assert_eq!(msg.username, username);
+        //         assert_eq!(msg.data, data);
+        //     }
+        //     Ok::<_, anyhow::Error>(())
+        // };
+
+        verify(&mut client1, "room1", "username1", MsgData::Join).await?;
+        verify(&mut client2, "room1", "username1", MsgData::Join).await?;
+
+        // if let Some(Message::Text(msg1)) = client1.recv().await {
+        //     let msg = Msg::try_from(msg1.as_str())?;
+        //     assert_eq!(msg.room, "room1");
+        //     assert_eq!(msg.username, "username1");
+        // }
+
+        // if let Some(Message::Text(msg1)) = client2.recv().await {
+        //     let msg = Msg::try_from(msg1.as_str())?;
+        //     assert_eq!(msg.room, "room1");
+        //     assert_eq!(msg.username, "username1");
+        // }
+
+        let msg2 = &Msg::join("room2", "username2");
+        client2.send(Message::Text(msg2.try_into()?))?;
+
+        assert!(client1.recv().await.is_some());
+        assert!(client2.recv().await.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn handle_message_and_leave_should_work() -> Result<()> {
+        todo!()
+    }
+
+    async fn verify(
+        client: &mut FakeClient<Message>,
+        room: &str,
+        username: &str,
+        data: MsgData,
+    ) -> Result<()> {
+        if let Some(Message::Text(msg1)) = client.recv().await {
+            let msg = Msg::try_from(msg1.as_str())?;
+            assert_eq!(msg.room, room);
+            assert_eq!(msg.username, username);
+            assert_eq!(msg.data, data);
+        }
+        Ok::<_, anyhow::Error>(())
     }
 }
