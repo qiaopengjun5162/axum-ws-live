@@ -1,5 +1,3 @@
-mod msg;
-
 use std::sync::Arc;
 
 use axum::{
@@ -9,9 +7,9 @@ use axum::{
 };
 use dashmap::{DashMap, DashSet};
 use futures::{Sink, SinkExt, Stream, StreamExt};
-pub use msg::{Msg, MsgData};
 use tokio::sync::broadcast;
 use tracing::warn;
+pub use ws_shared::{Msg, MsgData};
 
 const CAPACITY: usize = 64;
 

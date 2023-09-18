@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{routing::get, Extension, Router, Server};
-use axum_ws_live::{ws_handler, ChatState};
+use ws_server::{ws_handler, ChatState};
 
 #[tokio::main]
 async fn main() {
@@ -10,6 +10,7 @@ async fn main() {
         "/ws",
         get(ws_handler).layer(Extension(ChatState::default())),
     );
+    println!("Listening on http://{}", addr);
     Server::bind(&addr)
         .serve(app.into_make_service())
         .await
