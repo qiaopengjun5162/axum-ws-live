@@ -120,6 +120,7 @@ where
 }
 
 async fn handle_message(msg: Msg, state: Arc<State>) {
+    println!("receive: {msg:?}");
     let msg = match msg.data {
         MsgData::Join => {
             let username = msg.username.clone();
@@ -139,16 +140,21 @@ async fn handle_message(msg: Msg, state: Arc<State>) {
         MsgData::Leave => {
             if let Some(v) = state.user_rooms.get_mut(&msg.username) {
                 v.remove(&msg.room);
+                println!("Leave room 1 {msg:?}");
+                // v => RwLockGuard
                 if v.is_empty() {
+                    drop(v);
                     state.user_rooms.remove(&msg.username);
                 }
             }
             if let Some(v) = state.room_users.get_mut(&msg.room) {
                 v.remove(&msg.username);
                 if v.is_empty() {
+                    drop(v);
                     state.room_users.remove(&msg.room);
                 }
             }
+            println!("leave room: {msg:?}");
             msg
         }
         _ => msg,
@@ -167,6 +173,117 @@ mod tests {
 
     #[tokio::test]
     async fn handle_join_should_work() -> Result<()> {
+        // let (mut client1, socket1) = create_fake_connection();
+        // let (mut client2, socket2) = create_fake_connection();
+        // let state = ChatState::new();
+
+        // // mimic server behavior
+        // let state1 = state.clone();
+        // tokio::spawn(async move {
+        //     handle_socket(socket1, state1).await;
+        // });
+
+        // let state1 = state.clone();
+        // tokio::spawn(async move {
+        //     handle_socket(socket2, state1).await;
+        // });
+
+        // let msg1 = &Msg::join("room1", "username1");
+        // client1.send(Message::Text(msg1.try_into()?))?;
+
+        // let verify = |mut client: FakeClient<Message>,
+        //               room: &'static str,
+        //               username: &'static str,
+        //               data: MsgData| async move {
+        //     if let Some(Message::Text(msg1)) = client.recv().await {
+        //         let msg = Msg::try_from(msg1.as_str())?;
+        //         assert_eq!(msg.room, room);
+        //         assert_eq!(msg.username, username);
+        //         assert_eq!(msg.data, data);
+        //     }
+        //     Ok::<_, anyhow::Error>(())
+        // };
+
+        let (_client1, _client2, state) = prepare_connections().await?;
+        // should first get username1 join msg
+        // verify(&mut client1, "room1", "username1", MsgData::Join).await?;
+        // verify(&mut client2, "room1", "username1", MsgData::Join).await?;
+
+        // if let Some(Message::Text(msg1)) = client1.recv().await {
+        //     let msg = Msg::try_from(msg1.as_str())?;
+        //     assert_eq!(msg.room, "room1");
+        //     assert_eq!(msg.username, "username1");
+        // }
+
+        // if let Some(Message::Text(msg1)) = client2.recv().await {
+        //     let msg = Msg::try_from(msg1.as_str())?;
+        //     assert_eq!(msg.room, "room1");
+        //     assert_eq!(msg.username, "username1");
+        // }
+
+        // let msg2 = &Msg::join("room2", "username2");
+        // client2.send(Message::Text(msg2.try_into()?))?;
+
+        // then get username join msg
+        // assert!(client1.recv().await.is_some());
+        // assert!(client2.recv().await.is_some());
+
+        // verify state
+        let mut users = state.get_room_users("room1");
+        users.sort();
+        assert_eq!(users.len(), 2);
+        assert_eq!(users, &["username1", "username2"]);
+
+        let rooms = state.get_user_rooms("username1");
+        assert_eq!(rooms.len(), 1);
+        assert_eq!(rooms, &["room1"]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn handle_message_and_leave_should_work() -> Result<()> {
+        let (mut client1, mut client2, state) = prepare_connections().await?;
+
+        let msg1 = &Msg::new("room1", "username1", MsgData::Message("hello world".into()));
+        client1.send(Message::Text(msg1.try_into()?))?;
+
+        verify(
+            &mut client1,
+            "room1",
+            "username1",
+            MsgData::Message("hello world".into()),
+        )
+        .await?;
+
+        verify(
+            &mut client2,
+            "room1",
+            "username1",
+            MsgData::Message("hello world".into()),
+        )
+        .await?;
+
+        let msg2 = &Msg::new("room1", "username1", MsgData::Leave);
+        client1.send(Message::Text(msg2.try_into()?))?;
+
+        assert!(client1.recv().await.is_some());
+        assert!(client2.recv().await.is_some());
+
+        // verify state
+        let mut users = state.get_room_users("room1");
+        users.sort();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users, &["username2"]);
+
+        let rooms = state.get_user_rooms("username1");
+        assert!(rooms.is_empty());
+
+        Ok(())
+    }
+
+    async fn prepare_connections() -> Result<(FakeClient<Message>, FakeClient<Message>, ChatState)>
+    {
         let (mut client1, socket1) = create_fake_connection();
         let (mut client2, socket2) = create_fake_connection();
         let state = ChatState::new();
@@ -184,47 +301,17 @@ mod tests {
 
         let msg1 = &Msg::join("room1", "username1");
         client1.send(Message::Text(msg1.try_into()?))?;
-
-        // let verify = |mut client: FakeClient<Message>,
-        //               room: &'static str,
-        //               username: &'static str,
-        //               data: MsgData| async move {
-        //     if let Some(Message::Text(msg1)) = client.recv().await {
-        //         let msg = Msg::try_from(msg1.as_str())?;
-        //         assert_eq!(msg.room, room);
-        //         assert_eq!(msg.username, username);
-        //         assert_eq!(msg.data, data);
-        //     }
-        //     Ok::<_, anyhow::Error>(())
-        // };
+        let msg2 = &Msg::join("room1", "username2");
+        client2.send(Message::Text(msg2.try_into()?))?;
 
         verify(&mut client1, "room1", "username1", MsgData::Join).await?;
         verify(&mut client2, "room1", "username1", MsgData::Join).await?;
 
-        // if let Some(Message::Text(msg1)) = client1.recv().await {
-        //     let msg = Msg::try_from(msg1.as_str())?;
-        //     assert_eq!(msg.room, "room1");
-        //     assert_eq!(msg.username, "username1");
-        // }
-
-        // if let Some(Message::Text(msg1)) = client2.recv().await {
-        //     let msg = Msg::try_from(msg1.as_str())?;
-        //     assert_eq!(msg.room, "room1");
-        //     assert_eq!(msg.username, "username1");
-        // }
-
-        let msg2 = &Msg::join("room2", "username2");
-        client2.send(Message::Text(msg2.try_into()?))?;
-
+        // then get username join msg
         assert!(client1.recv().await.is_some());
         assert!(client2.recv().await.is_some());
 
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn handle_message_and_leave_should_work() -> Result<()> {
-        todo!()
+        Ok((client1, client2, state))
     }
 
     async fn verify(

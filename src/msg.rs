@@ -47,10 +47,10 @@ impl TryFrom<&Msg> for String {
 }
 
 impl Msg {
-    pub fn new(room: String, username: String, data: MsgData) -> Self {
+    pub fn new(room: &str, username: &str, data: MsgData) -> Self {
         Msg {
-            room,
-            username,
+            room: room.into(),
+            username: username.into(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
